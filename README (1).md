@@ -34,7 +34,7 @@ CORS_ORIGINS="*"
   cd frontend
   python -m http.server 3000 --directory build
   ```
-- Open http://localhost:3000/
+- Open http://localhost:3000
 
 ## Common Tasks
 - Stop servers: CTRL+C in the terminal running uvicorn or http.server.
