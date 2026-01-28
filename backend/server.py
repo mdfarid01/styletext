@@ -15,9 +15,21 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+db_name = os.environ.get('DB_NAME', 'test_database')
+client = None
+db = None
+
+async def connect_to_mongo():
+    global client, db
+    try:
+        client = AsyncIOMotorClient(mongo_url)
+        db = client[db_name]
+        # Test the connection
+        await client.server_info()
+        logger.info("Connected to MongoDB")
+    except Exception as e:
+        logger.warning(f"MongoDB connection failed: {e}. Running in demo mode.")
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -47,15 +59,20 @@ async def create_status_check(input: StatusCheckCreate):
     status_dict = input.model_dump()
     status_obj = StatusCheck(**status_dict)
     
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
+    if db:
+        # Convert to dict and serialize datetime to ISO string for MongoDB
+        doc = status_obj.model_dump()
+        doc['timestamp'] = doc['timestamp'].isoformat()
+        
+        _ = await db.status_checks.insert_one(doc)
     
-    _ = await db.status_checks.insert_one(doc)
     return status_obj
 
 @api_router.get("/status", response_model=List[StatusCheck])
 async def get_status_checks():
+    if not db:
+        return []
+    
     # Exclude MongoDB's _id field from the query results
     status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
     
@@ -84,6 +101,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@app.on_event("startup")
+async def startup_db_client():
+    await connect_to_mongo()
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    if client:
+        client.close()
